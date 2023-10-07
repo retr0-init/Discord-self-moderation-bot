@@ -5,6 +5,7 @@
     	python311
 	python311Packages.discordpy
 	python311Packages.psycopg2
+	python311Packages.numpy
 	postgresql
     ];
 }

@@ -128,7 +128,7 @@ class StdModerateVote:
 
 
 
-    async def create_vote(self, ctx: Context, args, desc=None, type=200, title_pre: str = "Anonymous Poll") -> None:
+    async def create_vote(self, ctx: Context, args, desc=None, type=200, title_pre: str = "Anonymous Poll", idl = [], pollTime=-1) -> None:
         """
         Creates a vote, entry point.
         :param ctx: Context of vote (channel)
@@ -146,11 +146,13 @@ class StdModerateVote:
 
         # Add to DB
         id, title = voteDB.addVote(creator, title, options, limit, ctx.guild, ctx.channel, 0, type, num_wins, title_pre)
+        idl.append(id)
 
         if desc is None:
             desc = self.vote_summary(args)
         else: desc += "\n"+self.vote_summary(args)
         if self.close_desc: desc += f" End the vote with `{voteDB.getPrefix(ctx.guild.id)}close {id}`."
+        if pollTime > 0: desc += f" This poll will end in {int(pollTime)} minutes."
 
         # Post messages and add reactions, store stage to allow resume
         messages = await self.post_vote(ctx, id, title, desc, options, creator.colour)

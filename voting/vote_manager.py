@@ -43,9 +43,9 @@ class VoteManager:
         rr = ReactionRoles(self.bot)
         await rr.create_vote(ctx, args)
 
-    async def std_moderate_vote(self, ctx, args, user_mention):
+    async def std_moderate_vote(self, ctx, args, user_mention, idl, pollTime=-1):
         smv = StdModerateVote(self.bot)
-        await smv.create_vote(ctx, args, desc = user_mention, title_pre = "Moderation Poll")
+        await smv.create_vote(ctx, args, desc = user_mention, title_pre = "Moderation Poll", idl=idl, pollTime=pollTime)
 
 
 

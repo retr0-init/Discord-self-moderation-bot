@@ -11,6 +11,14 @@ from voting.parsers import *
 # Main poll class, mainly a wrapper around Vote
 from voting.vote_manager import VoteManager
 
+import asyncio
+import numpy as np
+import re
+
+timeConst = 24 * 7 * (1 - np.exp(-1))
+pattern = re.compile(r"\b[0-9]*\.[0-9]+[hdw]\b")
+pattern1 = re.compile(r"\b[0-9]*[hdw]\b")
+pollTimeUnban = 3600
 
 class VoteModerate(commands.Cog):
     bot: Bot
@@ -23,11 +31,18 @@ class VoteModerate(commands.Cog):
     @commands.command(name="createban", aliases=["ban", "moderate"], help=poll_parser.format_help())
     @commands.guild_only()
     @wait_react
-    async def create_ban_poll(self, ctx: Context, user_to_ban: discord.Member):
+    async def create_ban_poll(self, ctx: Context, user_to_ban: discord.Member, time_to_ban: str):
+        '''
+        Create a timeout of the user. The time can be specified in hour (h), day (d) or week (w).
+        The time must be integer and there is no space between the timer value and the unit. e.g.
+        +ban @user 3d
+        The length of the poll will be determined by the timeout period. The longer the timeout is,
+         the longer the poll length will be.
+        '''
         try:
             print("Parsing args")
 
-            options = ["Are we going to ban user {}?".format(user_to_ban.display_name), "Yes", "No"]
+            options = [f"Are we going to ban user {user_to_ban.display_name} for {time_to_ban}?", "Yes", "No"]
 
             def extra_checks(args):  # Extra checks past the parser's basic ones. These are caught and forwarded in run_parser
                 if len(args.options) < 2 or len(symbols) < len(args.options): raise argparse.ArgumentError(opt_arg, f"Between 2 and {len(symbols)} options must be supplied.")
@@ -38,9 +53,24 @@ class VoteModerate(commands.Cog):
 
             args = run_parser(poll_parser, options, extra_checks)
             # Send feedback or run vote
-            if isinstance(args, str): await ctx.send(args)
+            idl = []
+            flag, timeBan = self.parseTimeout(ctx, time_to_ban)
+            if not flag:
+                await ctx.send("""Timeout value format error. The examples are like below:
+                +ban @user 3h
+                +ban @user 1d
+                +ban @user 1w""")
+            elif timeBan <= 0:
+                await ctx.send("Timeout value should be greater than 0!")
             else:
-                await self.vm.std_moderate_vote(ctx, args, user_to_ban.mention)
+                pollPeriod = self.calcPollPeriod(timeBan)
+                print(f"{pollPeriod} minutes")
+                if isinstance(args, str): await ctx.send(args)
+                else:
+                    await self.vm.std_moderate_vote(ctx, args, user_to_ban.mention, idl=idl, pollTime=pollPeriod)
+
+                await asyncio.sleep(int(pollPeriod * 60))
+                await self.close_poll(ctx, idl[0])
 
         # Catch any exception, to ensure the bot continues running for other votes
         # and to give error message due to error messages in async blocks not being reported otherwise
@@ -66,9 +96,13 @@ class VoteModerate(commands.Cog):
 
             args = run_parser(poll_parser, options, extra_checks)
             # Send feedback or run vote
+            idl = []
             if isinstance(args, str): await ctx.send(args)
             else:
-                await self.vm.std_moderate_vote(ctx, args, user_to_unban.mention)
+                await self.vm.std_moderate_vote(ctx, args, user_to_unban.mentioni, idl=idl, pollTime=pollTimeUnban)
+
+            await asyncio.sleep(pollTimeUnban)
+            await self.close_poll(ctx, idl[0])
 
         # Catch any exception, to ensure the bot continues running for other votes
         # and to give error message due to error messages in async blocks not being reported otherwise
@@ -101,6 +135,7 @@ class VoteModerate(commands.Cog):
     '''
 
     @commands.command(name="close", aliases=["closepoll", "closevote"], help="Ends a poll with ID `pid`")
+    @commands.has_permissions(administrator=True)
     @done_react
     @wait_react
     async def close_poll(self, ctx: Context, vid: int):
@@ -136,6 +171,7 @@ class VoteModerate(commands.Cog):
 
 
     @commands.command(name="halt", help="Ends a vote early with no results page.")
+    @commands.has_permissions(administrator=True)
     @wait_react
     @done_react
     async def halt(self, ctx: Context, vid: int):
@@ -173,6 +209,32 @@ class VoteModerate(commands.Cog):
 
         if user.bot: return
         await self.vm.on_reaction_remove(reaction, emoji, message, user)
+
+    @staticmethod
+    def calcPollPeriod(time_to_ban_in_min: np.float64) -> np.float64:
+        return np.ceil((1 - np.exp(-time_to_ban_in_min/timeConst)) * 1440)
+    
+    @staticmethod
+    def parseTimeout(ctx: Context, timeout: str) -> (bool, np.float64):
+        if bool(pattern.match(timeout)) or bool(pattern1.match(timeout)):
+            timeValue = np.float64(timeout[:-1])
+            timeUnit = timeout[-1]
+            if timeUnit == "h":
+                timeValue *= 1
+            elif timeUnit == "d":
+                timeValue *= 24
+            elif timeUnit == "w":
+                timeValue *= 168
+            else:
+                timeValue = 0
+                
+        else:
+            return False, 0
+
+        if timeValue <= 0:
+            timeValue = 0
+
+        return True, timeValue
 
 
 # Register module with bot
