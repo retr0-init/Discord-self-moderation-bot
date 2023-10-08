@@ -14,6 +14,7 @@ from voting.vote_manager import VoteManager
 import asyncio
 import numpy as np
 import re
+import datetime
 
 timeConst = 24 * 7 * (1 - np.exp(-1))
 pattern = re.compile(r"\b[0-9]*\.[0-9]+[hdw]\b")
@@ -40,38 +41,45 @@ class VoteModerate(commands.Cog):
          the longer the poll length will be.
         '''
         try:
-            print("Parsing args")
-
-            options = [f"Are we going to ban user {user_to_ban.display_name} for {time_to_ban}?", "Yes", "No"]
-
-            def extra_checks(args):  # Extra checks past the parser's basic ones. These are caught and forwarded in run_parser
-                if len(args.options) < 2 or len(symbols) < len(args.options): raise argparse.ArgumentError(opt_arg, f"Between 2 and {len(symbols)} options must be supplied.")
-                if args.winners <= 0: raise argparse.ArgumentError(win_arg, f"Cannot select less than 1 winner.")
-                if args.limit < 0: raise argparse.ArgumentError(lim_arg, f"Cannot have limit less than 1.")
-                for op in args.options:
-                    if len(op) > 50: raise argparse.ArgumentError(opt_arg, f"Option {op} is too long. Lines can be no longer than 50 characters (current length {len(op)}))")
-
-            args = run_parser(poll_parser, options, extra_checks)
-            # Send feedback or run vote
-            idl = []
-            flag, timeBan = self.parseTimeout(ctx, time_to_ban)
-            if not flag:
-                await ctx.send("""Timeout value format error. The examples are like below:
-                +ban @user 3h
-                +ban @user 1d
-                +ban @user 1w""")
-            elif timeBan <= 0:
-                await ctx.send("Timeout value should be greater than 0!")
+            if user_to_ban.is_timed_out():
+                await ctx.send("This user has already been banned!")
             else:
-                pollPeriod = self.calcPollPeriod(timeBan)
-                print(f"{pollPeriod} minutes")
-                if isinstance(args, str): await ctx.send(args)
+                print("Parsing args")
+
+                options = [f"Are we going to ban user {user_to_ban.display_name} for {time_to_ban}?", "Yes", "No"]
+
+                def extra_checks(args):  # Extra checks past the parser's basic ones. These are caught and forwarded in run_parser
+                    if len(args.options) < 2 or len(symbols) < len(args.options): raise argparse.ArgumentError(opt_arg, f"Between 2 and {len(symbols)} options must be supplied.")
+                    if args.winners <= 0: raise argparse.ArgumentError(win_arg, f"Cannot select less than 1 winner.")
+                    if args.limit < 0: raise argparse.ArgumentError(lim_arg, f"Cannot have limit less than 1.")
+                    for op in args.options:
+                        if len(op) > 50: raise argparse.ArgumentError(opt_arg, f"Option {op} is too long. Lines can be no longer than 50 characters (current length {len(op)}))")
+
+                args = run_parser(poll_parser, options, extra_checks)
+                # Send feedback or run vote
+                idl = []
+                flag, timeBan = self.parseTimeout(ctx, time_to_ban)
+                if not flag:
+                    await ctx.send("""Timeout value format error. The examples are like below:
+                    +ban @user 3h
+                    +ban @user 1d
+                    +ban @user 1w""")
+                elif timeBan <= 0:
+                    await ctx.send("Timeout value should be greater than 0!")
                 else:
-                    await self.vm.std_moderate_vote(ctx, args, user_to_ban.mention, idl=idl, pollTime=pollPeriod)
+                    pollPeriod = self.calcPollPeriod(timeBan)
+                    print(f"{pollPeriod} minutes")
+                    if isinstance(args, str): await ctx.send(args)
+                    else:
+                        await self.vm.std_moderate_vote(ctx, args, user_to_ban.mention, idl=idl, pollTime=pollPeriod)
 
-                await asyncio.sleep(int(pollPeriod * 60))
-                await self.close_poll(ctx, idl[0])
+                    await asyncio.sleep(int(pollPeriod * 60))
+                    await self.close_poll(ctx, idl[0])
 
+                    if await self.isProgress(ctx, 1, 0):
+                        await ctx.send(f"Decision: Timeout {user_to_ban.mention} for {time_to_ban}.")
+                        await user_to_ban.timeout(datetime.timedelta(hours=timeBan), reason=f"Vote to moderate. Raised by {ctx.author}")
+    
         # Catch any exception, to ensure the bot continues running for other votes
         # and to give error message due to error messages in async blocks not being reported otherwise
         except Exception as e:
@@ -83,26 +91,34 @@ class VoteModerate(commands.Cog):
     @wait_react
     async def create_unban_poll(self, ctx: Context, user_to_unban: discord.Member):
         try:
-            print("Parsing args")
-
-            options = ["Are we going to unban user {}?".format(user_to_unban.display_name), "Yes", "No"]
-
-            def extra_checks(args):  # Extra checks past the parser's basic ones. These are caught and forwarded in run_parser
-                if len(args.options) < 2 or len(symbols) < len(args.options): raise argparse.ArgumentError(opt_arg, f"Between 2 and {len(symbols)} options must be supplied.")
-                if args.winners <= 0: raise argparse.ArgumentError(win_arg, f"Cannot select less than 1 winner.")
-                if args.limit < 0: raise argparse.ArgumentError(lim_arg, f"Cannot have limit less than 1.")
-                for op in args.options:
-                    if len(op) > 50: raise argparse.ArgumentError(opt_arg, f"Option {op} is too long. Lines can be no longer than 50 characters (current length {len(op)}))")
-
-            args = run_parser(poll_parser, options, extra_checks)
-            # Send feedback or run vote
-            idl = []
-            if isinstance(args, str): await ctx.send(args)
+            if not user_to_unban.is_timed_out():
+                await ctx.send("This user is not banned!")
             else:
-                await self.vm.std_moderate_vote(ctx, args, user_to_unban.mentioni, idl=idl, pollTime=pollTimeUnban)
+                print("Parsing args")
+                pollTimeUnban = 30
 
-            await asyncio.sleep(pollTimeUnban)
-            await self.close_poll(ctx, idl[0])
+                options = ["Are we going to unban user {}?".format(user_to_unban.display_name), "Yes", "No"]
+
+                def extra_checks(args):  # Extra checks past the parser's basic ones. These are caught and forwarded in run_parser
+                    if len(args.options) < 2 or len(symbols) < len(args.options): raise argparse.ArgumentError(opt_arg, f"Between 2 and {len(symbols)} options must be supplied.")
+                    if args.winners <= 0: raise argparse.ArgumentError(win_arg, f"Cannot select less than 1 winner.")
+                    if args.limit < 0: raise argparse.ArgumentError(lim_arg, f"Cannot have limit less than 1.")
+                    for op in args.options:
+                        if len(op) > 50: raise argparse.ArgumentError(opt_arg, f"Option {op} is too long. Lines can be no longer than 50 characters (current length {len(op)}))")
+
+                args = run_parser(poll_parser, options, extra_checks)
+                # Send feedback or run vote
+                idl = []
+                if isinstance(args, str): await ctx.send(args)
+                else:
+                    await self.vm.std_moderate_vote(ctx, args, user_to_unban.mention, idl=idl, pollTime=pollTimeUnban)
+
+                await asyncio.sleep(pollTimeUnban)
+                await self.close_poll(ctx, idl[0])
+
+                if await self.isProgress(ctx, 1, 0):
+                    await ctx.send(f"Decision: Revoke timeout for {user_to_unban.mention}.")
+                    await user_to_unban.timeout(None, reason="Vote to revoke moderation")
 
         # Catch any exception, to ensure the bot continues running for other votes
         # and to give error message due to error messages in async blocks not being reported otherwise
@@ -134,7 +150,7 @@ class VoteModerate(commands.Cog):
             raise e
     '''
 
-    @commands.command(name="close", aliases=["closepoll", "closevote"], help="Ends a poll with ID `pid`")
+    @commands.command(name="closem", aliases=["closempoll", "closemvote"], help="Ends a poll with ID `pid`")
     @commands.has_permissions(administrator=True)
     @done_react
     @wait_react
@@ -235,6 +251,10 @@ class VoteModerate(commands.Cog):
             timeValue = 0
 
         return True, timeValue
+
+    @staticmethod
+    async def isProgress(ctx: Context, yes: int, no: int) -> bool:
+        return True
 
 
 # Register module with bot
